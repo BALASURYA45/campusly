@@ -1,0 +1,15 @@
+{
+  "name": "smart-curriculum-app",
+  "version": "1.0.0",
+  "description": "Smart Curriculum Activity & Attendance Management Application",
+  "scripts": {
+    "install-all": "npm install && cd backend && npm install && cd ../frontend-web && npm install",
+    "backend": "cd backend && npm run dev",
+    "frontend": "cd frontend-web && npm start",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "start": "npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
