@@ -94,6 +94,14 @@ const AdminLogin = () => {
               onChange={onChange}
             />
             <Button
+              fullWidth
+              variant="text"
+              onClick={() => navigate('/forgot-password?role=admin')}
+              sx={{ mt: 1 }}
+            >
+              Forgot Password?
+            </Button>
+            <Button
               type="submit"
               fullWidth
               variant="contained"

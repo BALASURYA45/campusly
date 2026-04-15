@@ -1,6 +1,8 @@
 const Attendance = require('../models/Attendance');
 const { notifyAttendanceMarked } = require('../utils/notificationService');
 const DigitalTwinService = require('../utils/digitalTwinService');
+const { buildAttendanceSummaryFromCounts } = require('../utils/attendanceSummary');
+const mongoose = require('mongoose');
 
 // @desc    Mark attendance (idempotent, supports bulk)
 // @route   POST /api/v1/attendance
@@ -116,6 +118,72 @@ exports.getStudentAttendance = async (req, res, next) => {
       .populate('class', 'name');
 
     res.status(200).json({ success: true, data: attendance });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+};
+
+// @desc    Get my attendance summary (weighted % + 75% calculator)
+// @route   GET /api/v1/attendance/me/summary
+// @access  Private/Student
+exports.getMyAttendanceSummary = async (req, res, next) => {
+  try {
+    const targetPercentage = Number(req.query.targetPercentage || 75);
+
+    const grouped = await Attendance.aggregate([
+      { $match: { student: new mongoose.Types.ObjectId(req.user.id) } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+
+    const counts = grouped.reduce((acc, row) => {
+      acc[row._id] = row.count;
+      return acc;
+    }, {});
+
+    const summary = buildAttendanceSummaryFromCounts(counts, targetPercentage);
+
+    res.status(200).json({ success: true, data: summary });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+};
+
+// @desc    Get attendance summary for a student
+// @route   GET /api/v1/attendance/student/:studentId/summary
+// @access  Private/Student/Parent/Teacher/Admin
+exports.getStudentAttendanceSummary = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const targetPercentage = Number(req.query.targetPercentage || 75);
+
+    // Reuse the same access checks as getStudentAttendance
+    if (req.user.role === 'student' && req.user.id !== studentId) {
+      return res.status(403).json({ message: 'Students can only access their own attendance' });
+    }
+
+    if (req.user.role === 'parent') {
+      const User = require('../models/User');
+      const parent = await User.findById(req.user.id).select('children');
+      const hasAccess = parent?.children?.some(childId => childId.toString() === studentId);
+
+      if (!hasAccess) {
+        return res.status(403).json({ message: 'Parents can only access linked children attendance' });
+      }
+    }
+
+    const grouped = await Attendance.aggregate([
+      { $match: { student: new mongoose.Types.ObjectId(studentId) } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+
+    const counts = grouped.reduce((acc, row) => {
+      acc[row._id] = row.count;
+      return acc;
+    }, {});
+
+    const summary = buildAttendanceSummaryFromCounts(counts, targetPercentage);
+
+    res.status(200).json({ success: true, data: summary });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }

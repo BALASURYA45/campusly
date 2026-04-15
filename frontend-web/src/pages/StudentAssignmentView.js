@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Container, Typography, Paper, List, ListItem, ListItemText, Button, TextField, Box, Chip, Divider, Alert } from '@mui/material';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Container, Typography, Paper, Button, TextField, Box, Chip, Divider, Alert, Tabs, Tab, Grid, Stack, CircularProgress } from '@mui/material';
 import API from '../utils/api';
 import { useSelector } from 'react-redux';
 
@@ -7,6 +7,9 @@ const StudentAssignmentView = () => {
   const [assignments, setAssignments] = useState([]);
   const [submissionUrl, setSubmissionUrl] = useState({});
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState(0);
+  const [filter, setFilter] = useState('All');
+  const [reminderMsg, setReminderMsg] = useState('');
   const { user } = useSelector((state) => state.auth);
 
   useEffect(() => {
@@ -16,20 +19,23 @@ const StudentAssignmentView = () => {
   const fetchAssignments = async () => {
     if (!user) return;
     try {
-      // First, get the student's class
-      const { data: classRes } = await API.get('/classes');
-      const studentClass = classRes.data.find(c => 
-        c.students.includes(user.id) || c.students.includes(user.user?.id)
-      );
-
-      if (studentClass) {
-        const { data: asgnRes } = await API.get(`/assignments/class/${studentClass._id}`);
-        setAssignments(asgnRes.data);
-      }
+      const { data: asgnRes } = await API.get('/assignments/me/planner');
+      setAssignments(asgnRes.data || []);
     } catch (err) {
       console.error('Error fetching assignments:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runReminders = async () => {
+    try {
+      setReminderMsg('');
+      const { data } = await API.post('/assignments/me/reminders/run?windowHours=24');
+      const created = data?.data?.created ?? 0;
+      setReminderMsg(created > 0 ? `Created ${created} reminder(s) for due-soon assignments.` : 'No new reminders needed right now.');
+    } catch (err) {
+      setReminderMsg(err.response?.data?.message || 'Failed to create reminders');
     }
   };
 
@@ -47,22 +53,124 @@ const StudentAssignmentView = () => {
   };
 
   const getSubmissionStatus = (assignment) => {
-    const studentId = user.id || user.user?.id;
-    const submission = assignment.submissions?.find(s => s.student === studentId || s.student?._id === studentId);
-    return submission;
+    return assignment?.planner || null;
   };
+
+  const filtered = useMemo(() => {
+    const now = new Date();
+    return (assignments || []).filter((a) => {
+      const p = a.planner;
+      const due = new Date(a.dueDate);
+      if (!p) return true;
+      if (filter === 'Pending') return !p.isSubmitted && due >= now;
+      if (filter === 'Overdue') return !p.isSubmitted && due < now;
+      if (filter === 'Submitted') return p.isSubmitted;
+      return true;
+    });
+  }, [assignments, filter]);
+
+  const groupedByDay = useMemo(() => {
+    const map = new Map();
+    for (const a of filtered) {
+      const key = new Date(a.dueDate).toLocaleDateString();
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(a);
+    }
+    return Array.from(map.entries()).sort((a, b) => new Date(a[0]) - new Date(b[0]));
+  }, [filtered]);
+
+  const riskColor = (risk) => {
+    if (risk === 'Overdue') return 'error';
+    if (risk === 'Critical') return 'error';
+    if (risk === 'High') return 'warning';
+    if (risk === 'Medium') return 'info';
+    if (risk === 'Safe') return 'success';
+    if (risk === 'Late Submission') return 'warning';
+    return 'default';
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Container sx={{ mt: 4 }}>
-      <Typography variant="h4" gutterBottom>My Assignments</Typography>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ mb: 2 }}>
+        <Typography variant="h4">My Assignments</Typography>
+        <Button variant="outlined" onClick={runReminders}>Create Due-Soon Reminders (24h)</Button>
+      </Stack>
+
+      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 2 }}>
+        <Tab label="Planner" />
+        <Tab label="Submit & Feedback" />
+      </Tabs>
+
+      {reminderMsg && <Alert severity="info" sx={{ mb: 2 }}>{reminderMsg}</Alert>}
+
+      {tab === 0 && (
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
+            <Typography variant="subtitle1" fontWeight={700}>Filter</Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap">
+              {['All', 'Pending', 'Overdue', 'Submitted'].map((k) => (
+                <Chip key={k} label={k} onClick={() => setFilter(k)} color={filter === k ? 'primary' : 'default'} />
+              ))}
+            </Stack>
+            <Box sx={{ flex: 1 }} />
+            <Typography variant="body2" color="text.secondary">
+              Tip: open this page daily; reminders will appear in-app.
+            </Typography>
+          </Stack>
+        </Paper>
+      )}
       
-      {!loading && assignments.length === 0 && (
+      {assignments.length === 0 && (
         <Alert severity="info">No assignments found for your class.</Alert>
       )}
 
-      {assignments.map((assignment) => {
+      {tab === 0 && groupedByDay.map(([day, items]) => (
+        <Box key={day} sx={{ mb: 3 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>{day}</Typography>
+          <Grid container spacing={2}>
+            {items.map((assignment) => {
+              const p = getSubmissionStatus(assignment);
+              return (
+                <Grid item xs={12} md={6} key={assignment._id}>
+                  <Paper sx={{ p: 2 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+                      <Box>
+                        <Typography variant="subtitle1" fontWeight={800}>{assignment.title}</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {assignment.subject?.name || 'Subject'} | {assignment.class?.name || 'Class'}
+                        </Typography>
+                        {assignment.description && (
+                          <Typography variant="body2" sx={{ mt: 1 }}>{assignment.description}</Typography>
+                        )}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                          Due: {new Date(assignment.dueDate).toLocaleString()} | Days left: {p?.daysLeft ?? '-'}
+                        </Typography>
+                      </Box>
+                      <Stack spacing={1} alignItems="flex-end">
+                        <Chip label={p?.submissionStatus || 'Unknown'} color={p?.isSubmitted ? 'success' : 'warning'} />
+                        <Chip label={p?.risk || 'Low'} color={riskColor(p?.risk)} size="small" />
+                      </Stack>
+                    </Stack>
+                  </Paper>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </Box>
+      ))}
+
+      {tab === 1 && assignments.map((assignment) => {
         const submission = getSubmissionStatus(assignment);
         const isPastDue = new Date(assignment.dueDate) < new Date();
+        const my = assignment.mySubmission;
 
         return (
           <Paper key={assignment._id} sx={{ p: 3, mb: 2 }}>
@@ -77,8 +185,8 @@ const StudentAssignmentView = () => {
               <Box>
                 {submission ? (
                   <Chip 
-                    label={submission.grade ? `Graded: ${submission.grade}` : "Submitted"} 
-                    color={submission.grade ? "success" : "primary"} 
+                    label={submission.grade ? `Graded: ${submission.grade}` : (submission.isLate ? 'Late Submitted' : "Submitted")} 
+                    color={submission.grade ? "success" : "primary"}
                   />
                 ) : (
                   <Chip 
@@ -91,16 +199,23 @@ const StudentAssignmentView = () => {
 
             <Divider sx={{ my: 2 }} />
 
-            {submission ? (
+            {my ? (
               <Box>
                 <Typography variant="subtitle2" color="primary">Your Submission:</Typography>
-                <Typography variant="body2" component="a" href={submission.fileUrl} target="_blank" rel="noopener noreferrer">
-                  {submission.fileUrl}
-                </Typography>
-                {submission.feedback && (
+                {my.submittedAt && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    Submitted at: {new Date(my.submittedAt).toLocaleString()}
+                  </Typography>
+                )}
+                {my.fileUrl && (
+                  <Typography variant="body2" component="a" href={my.fileUrl} target="_blank" rel="noopener noreferrer">
+                    View submission
+                  </Typography>
+                )}
+                {my.feedback && (
                   <Box sx={{ mt: 1, p: 1, bgcolor: '#f5f5f5', borderRadius: 1 }}>
                     <Typography variant="caption" color="textSecondary">Teacher Feedback:</Typography>
-                    <Typography variant="body2">{submission.feedback}</Typography>
+                    <Typography variant="body2">{my.feedback}</Typography>
                   </Box>
                 )}
               </Box>

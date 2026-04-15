@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Tabs, Tab, Box, Typography, Paper, Grid, Button, IconButton, TextField, MenuItem, Select, FormControl, InputLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions, Checkbox, FormControlLabel } from '@mui/material';
+import { Container, Tabs, Tab, Box, Typography, Paper, Grid, Button, IconButton, TextField, MenuItem, Select, FormControl, InputLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions, Checkbox, FormControlLabel, Alert } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import API from '../utils/api';
 
@@ -9,9 +8,18 @@ const AdminManagement = () => {
   const [tabIndex, setTabIndex] = useState(0);
   const [data, setData] = useState({ users: [], classes: [], subjects: [] });
   const [loading, setLoading] = useState(false);
-  const [openDialog, setOpenDialog] = useState(false);
-  const [currentEntity, setCurrentEntity] = useState(null);
-  const [editMode, setEditMode] = useState(false);
+  const [openUserDialog, setOpenUserDialog] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [createSuccess, setCreateSuccess] = useState('');
+  const [newUser, setNewUser] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'student',
+    rollNumber: '',
+    employeeId: '',
+    parentId: '',
+  });
 
   useEffect(() => {
     fetchData();
@@ -52,9 +60,69 @@ const AdminManagement = () => {
     setTabIndex(newValue);
   };
 
+  const resetUserForm = () => {
+    setNewUser({
+      name: '',
+      email: '',
+      password: '',
+      role: 'student',
+      rollNumber: '',
+      employeeId: '',
+      parentId: '',
+    });
+    setCreateError('');
+  };
+
+  const handleOpenUserDialog = () => {
+    resetUserForm();
+    setOpenUserDialog(true);
+  };
+
+  const handleCloseUserDialog = () => {
+    setOpenUserDialog(false);
+    resetUserForm();
+  };
+
+  const handleCreateUser = async () => {
+    setCreateError('');
+    setCreateSuccess('');
+    try {
+      const payload = {
+        name: newUser.name.trim(),
+        email: newUser.email.trim().toLowerCase(),
+        password: newUser.password,
+        role: newUser.role,
+      };
+
+      if (newUser.role === 'student') payload.rollNumber = newUser.rollNumber.trim();
+      if (newUser.role === 'teacher') payload.employeeId = newUser.employeeId.trim();
+      if (newUser.role === 'parent') payload.parentId = newUser.parentId.trim();
+
+      await API.post('/users', payload);
+      setCreateSuccess(`${newUser.role} created successfully`);
+      handleCloseUserDialog();
+      fetchData();
+    } catch (err) {
+      setCreateError(err.response?.data?.message || 'Failed to create user');
+    }
+  };
+
+  const roleIdField = newUser.role === 'student'
+    ? { key: 'rollNumber', label: 'Roll Number' }
+    : newUser.role === 'teacher'
+      ? { key: 'employeeId', label: 'Employee ID' }
+      : newUser.role === 'parent'
+        ? { key: 'parentId', label: 'Parent ID' }
+        : null;
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4 }}>
       <Typography variant="h4" gutterBottom>Admin Management</Typography>
+      {createSuccess && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setCreateSuccess('')}>
+          {createSuccess}
+        </Alert>
+      )}
       <Paper sx={{ width: '100%', mb: 2 }}>
         <Tabs value={tabIndex} onChange={handleTabChange} indicatorColor="primary" textColor="primary" centered>
           <Tab label="Users" />
@@ -65,11 +133,96 @@ const AdminManagement = () => {
       </Paper>
 
       <Box sx={{ p: 2 }}>
-        {tabIndex === 0 && <UserTable users={data.users} onDelete={(id) => handleDelete(id, 'users')} />}
+        {tabIndex === 0 && (
+          <>
+            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenUserDialog}>
+                Add User
+              </Button>
+            </Box>
+            <UserTable users={data.users} onDelete={(id) => handleDelete(id, 'users')} />
+          </>
+        )}
         {tabIndex === 1 && <ClassTable classes={data.classes} onDelete={(id) => handleDelete(id, 'classes')} />}
         {tabIndex === 2 && <SubjectTable subjects={data.subjects} onDelete={(id) => handleDelete(id, 'subjects')} />}
         {tabIndex === 3 && <NotificationCenter />}
       </Box>
+
+      <Dialog open={openUserDialog} onClose={handleCloseUserDialog} fullWidth maxWidth="sm">
+        <DialogTitle>Add New User</DialogTitle>
+        <DialogContent>
+          {createError && (
+            <Alert severity="error" sx={{ mt: 1, mb: 2 }}>
+              {createError}
+            </Alert>
+          )}
+
+          <TextField
+            fullWidth
+            margin="normal"
+            label="Name"
+            value={newUser.name}
+            onChange={(e) => setNewUser((prev) => ({ ...prev, name: e.target.value }))}
+          />
+
+          <TextField
+            fullWidth
+            margin="normal"
+            label="Email"
+            type="email"
+            value={newUser.email}
+            onChange={(e) => setNewUser((prev) => ({ ...prev, email: e.target.value }))}
+          />
+
+          <TextField
+            fullWidth
+            margin="normal"
+            label="Password"
+            type="password"
+            value={newUser.password}
+            onChange={(e) => setNewUser((prev) => ({ ...prev, password: e.target.value }))}
+          />
+
+          <FormControl fullWidth margin="normal">
+            <InputLabel>Role</InputLabel>
+            <Select
+              label="Role"
+              value={newUser.role}
+              onChange={(e) => setNewUser((prev) => ({
+                ...prev,
+                role: e.target.value,
+                rollNumber: '',
+                employeeId: '',
+                parentId: '',
+              }))}
+            >
+              <MenuItem value="student">Student</MenuItem>
+              <MenuItem value="teacher">Teacher</MenuItem>
+              <MenuItem value="parent">Parent</MenuItem>
+            </Select>
+          </FormControl>
+
+          {roleIdField && (
+            <TextField
+              fullWidth
+              margin="normal"
+              label={roleIdField.label}
+              value={newUser[roleIdField.key]}
+              onChange={(e) => setNewUser((prev) => ({ ...prev, [roleIdField.key]: e.target.value }))}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseUserDialog}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleCreateUser}
+            disabled={!newUser.name || !newUser.email || !newUser.password || !roleIdField || !newUser[roleIdField.key]}
+          >
+            Create User
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
@@ -83,6 +236,8 @@ const UserTable = ({ users, onDelete }) => (
           <TableCell>Email</TableCell>
           <TableCell>Role</TableCell>
           <TableCell>Roll Number</TableCell>
+          <TableCell>Employee ID</TableCell>
+          <TableCell>Parent ID</TableCell>
           <TableCell align="right">Actions</TableCell>
         </TableRow>
       </TableHead>
@@ -93,6 +248,8 @@ const UserTable = ({ users, onDelete }) => (
             <TableCell>{user.email}</TableCell>
             <TableCell>{user.role.toUpperCase()}</TableCell>
             <TableCell>{user.rollNumber || '-'}</TableCell>
+            <TableCell>{user.employeeId || '-'}</TableCell>
+            <TableCell>{user.parentId || '-'}</TableCell>
             <TableCell align="right">
               <IconButton color="error" onClick={() => onDelete(user._id)}><DeleteIcon /></IconButton>
             </TableCell>

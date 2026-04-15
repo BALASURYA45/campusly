@@ -1,6 +1,64 @@
 const Assignment = require('../models/Assignment');
 const { notifyAssignmentCreated, notifyAssignmentSubmitted } = require('../utils/notificationService');
 const DigitalTwinService = require('../utils/digitalTwinService');
+const Class = require('../models/Class');
+const Notification = require('../models/Notification');
+const mongoose = require('mongoose');
+
+const getAssignmentPlannerStatus = (assignment, studentId) => {
+  const due = new Date(assignment.dueDate);
+  const now = new Date();
+  const msLeft = due.getTime() - now.getTime();
+  const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+
+  const submission = (assignment.submissions || []).find((s) => {
+    const sid = s.student?._id || s.student;
+    return String(sid) === String(studentId);
+  });
+
+  if (submission) {
+    const graded = submission.status === 'Graded' || !!submission.grading?.grade;
+    return {
+      submissionStatus: graded ? 'Graded' : 'Submitted',
+      isSubmitted: true,
+      isLate: !!submission.isLate,
+      submittedAt: submission.submittedAt || null,
+      grade: submission.grading?.grade || null,
+      marksObtained: submission.grading?.marksObtained ?? null,
+      daysLeft,
+      risk: submission.isLate ? 'Late Submission' : 'Safe',
+    };
+  }
+
+  if (msLeft < 0) {
+    return {
+      submissionStatus: 'Not Submitted',
+      isSubmitted: false,
+      isLate: true,
+      submittedAt: null,
+      grade: null,
+      marksObtained: null,
+      daysLeft,
+      risk: 'Overdue',
+    };
+  }
+
+  let risk = 'Low';
+  if (daysLeft <= 1) risk = 'Critical';
+  else if (daysLeft <= 3) risk = 'High';
+  else if (daysLeft <= 7) risk = 'Medium';
+
+  return {
+    submissionStatus: 'Not Submitted',
+    isSubmitted: false,
+    isLate: false,
+    submittedAt: null,
+    grade: null,
+    marksObtained: null,
+    daysLeft,
+    risk,
+  };
+};
 
 // @desc    Get all assignments
 // @route   GET /api/v1/assignments
@@ -24,6 +82,137 @@ exports.getAllAssignments = async (req, res, next) => {
       .populate('submissions.student', 'name email rollNumber');
 
     res.status(200).json({ success: true, data: assignments });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+};
+
+// @desc    Get my assignments planner (status + late risk)
+// @route   GET /api/v1/assignments/me/planner
+// @access  Private/Student
+exports.getMyAssignmentsPlanner = async (req, res, next) => {
+  try {
+    const studentId = req.user.id;
+    const from = req.query.from ? new Date(req.query.from) : null;
+    const to = req.query.to ? new Date(req.query.to) : null;
+
+    const classes = await Class.find({ students: new mongoose.Types.ObjectId(studentId) }).select('_id name');
+    const classIds = classes.map((c) => c._id);
+
+    const filter = { class: { $in: classIds } };
+    if (from || to) {
+      filter.dueDate = {};
+      if (from) filter.dueDate.$gte = from;
+      if (to) filter.dueDate.$lte = to;
+    }
+
+    const assignments = await Assignment.find(filter)
+      .sort({ dueDate: 1 })
+      .populate('subject', 'name code')
+      .populate('class', 'name')
+      .populate('teacher', 'name')
+      .populate('submissions.student', 'name rollNumber');
+
+    const data = assignments.map((a) => {
+      const planner = getAssignmentPlannerStatus(a, studentId);
+      const my = (a.submissions || []).find((s) => {
+        const sid = s.student?._id || s.student;
+        return String(sid) === String(studentId);
+      });
+      return {
+        _id: a._id,
+        title: a.title,
+        description: a.description,
+        instructions: a.instructions,
+        dueDate: a.dueDate,
+        status: a.status,
+        subject: a.subject,
+        class: a.class,
+        teacher: a.teacher,
+        planner,
+        mySubmission: my ? {
+          fileUrl: my.fileUrl || null,
+          fileName: my.fileName || null,
+          submittedAt: my.submittedAt || null,
+          isLate: !!my.isLate,
+          status: my.status || null,
+          grade: my.grading?.grade || null,
+          marksObtained: my.grading?.marksObtained ?? null,
+          feedback: my.grading?.feedback || null,
+        } : null,
+      };
+    });
+
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+};
+
+// @desc    Create in-app reminders for due assignments (no email)
+// @route   POST /api/v1/assignments/me/reminders/run
+// @access  Private/Student
+exports.runMyAssignmentReminders = async (req, res, next) => {
+  try {
+    const studentId = req.user.id;
+    const windowHours = Number(req.query.windowHours || 24);
+    const now = new Date();
+    const until = new Date(now.getTime() + windowHours * 60 * 60 * 1000);
+
+    const classes = await Class.find({ students: new mongoose.Types.ObjectId(studentId) }).select('_id');
+    const classIds = classes.map((c) => c._id);
+
+    const assignments = await Assignment.find({
+      class: { $in: classIds },
+      dueDate: { $gte: now, $lte: until },
+      status: 'Published',
+    }).select('_id title dueDate submissions');
+
+    let created = 0;
+    const io = req.app.get('socketio') || global.io;
+
+    for (const a of assignments) {
+      const planner = getAssignmentPlannerStatus(a, studentId);
+      if (planner.isSubmitted) continue;
+
+      const existing = await Notification.findOne({
+        recipient: studentId,
+        relatedModel: 'Assignment',
+        relatedId: a._id,
+        title: 'Assignment Due Soon',
+      }).select('_id');
+
+      if (existing) continue;
+
+      const notif = await Notification.create({
+        recipient: studentId,
+        title: 'Assignment Due Soon',
+        message: `"${a.title}" is due on ${new Date(a.dueDate).toLocaleString()}. Risk: ${planner.risk}.`,
+        type: 'assignment',
+        relatedModel: 'Assignment',
+        relatedId: a._id,
+        sender: null,
+        notificationMethods: { inApp: true, email: false, push: false },
+        priority: planner.risk === 'Critical' ? 'high' : (planner.risk === 'High' ? 'high' : 'medium'),
+        actionUrl: '/my-assignments',
+      });
+
+      created += 1;
+
+      if (io) {
+        io.to(`user_${studentId}`).emit('notification', {
+          id: notif._id,
+          title: notif.title,
+          message: notif.message,
+          type: notif.type,
+          priority: notif.priority,
+          createdAt: notif.createdAt,
+          actionUrl: notif.actionUrl,
+        });
+      }
+    }
+
+    res.status(200).json({ success: true, data: { created } });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }

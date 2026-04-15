@@ -2,6 +2,7 @@ const XLSX = require('xlsx');
 const User = require('../models/User');
 const fs = require('fs');
 const path = require('path');
+const COMMON_EMAIL = process.env.FROM_EMAIL || 'balasuryad13062006@gmail.com';
 
 // @desc    Import students from Excel file
 // @route   POST /api/v1/students/bulk-import
@@ -48,7 +49,7 @@ exports.bulkImportStudents = async (req, res, next) => {
       const rowNumber = i + 2; // Row number in Excel (header is row 1)
 
       try {
-        const { 'Roll Number': rollNumber, Password: password, Name: name, Email: email } = row;
+        const { 'Roll Number': rollNumber, Password: password, Name: name } = row;
 
         // Validate required fields - only Roll Number and Password are mandatory
         if (!rollNumber || !password) {
@@ -61,11 +62,8 @@ exports.bulkImportStudents = async (req, res, next) => {
           continue;
         }
 
-        // Generate temporary name and email if not provided
+        // Generate temporary name; email is fixed for all users
         const studentName = name && name.trim() ? name.trim() : `Student ${rollNumber.trim()}`;
-        const studentEmail = email && email.trim() 
-          ? email.trim().toLowerCase() 
-          : `${rollNumber.trim().toLowerCase()}@student.edu`;
 
         // Check if roll number already exists
         let existingUser = await User.findOne({ rollNumber: rollNumber.trim() });
@@ -79,22 +77,10 @@ exports.bulkImportStudents = async (req, res, next) => {
           continue;
         }
 
-        // Check if email already exists
-        existingUser = await User.findOne({ email: studentEmail });
-        if (existingUser) {
-          results.failed++;
-          results.errors.push({
-            row: rowNumber,
-            rollNumber: rollNumber,
-            error: `Email ${studentEmail} already registered`,
-          });
-          continue;
-        }
-
         // Create new student
         const newStudent = await User.create({
           name: studentName,
-          email: studentEmail,
+          email: COMMON_EMAIL,
           password: password.toString().trim(),
           role: 'student',
           rollNumber: rollNumber.trim().toUpperCase(),
@@ -135,12 +121,12 @@ exports.bulkImportStudents = async (req, res, next) => {
 // @access  Public (Only once)
 exports.createAdminAccount = async (req, res, next) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, password } = req.body;
 
     // Validate required fields
-    if (!name || !email || !password) {
+    if (!name || !password) {
       return res.status(400).json({ 
-        message: 'Please provide name, email, and password' 
+        message: 'Please provide name and password' 
       });
     }
 
@@ -152,18 +138,10 @@ exports.createAdminAccount = async (req, res, next) => {
       });
     }
 
-    // Check if email already exists
-    let existingUser = await User.findOne({ email: email.trim().toLowerCase() });
-    if (existingUser) {
-      return res.status(400).json({ 
-        message: 'Email already registered' 
-      });
-    }
-
     // Create admin account
     const adminUser = await User.create({
       name: name.trim(),
-      email: email.trim().toLowerCase(),
+      email: COMMON_EMAIL,
       password: password.toString().trim(),
       role: 'admin',
       isVerified: true,

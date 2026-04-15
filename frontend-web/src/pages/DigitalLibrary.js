@@ -14,6 +14,7 @@ import API from '../utils/api';
 
 const DigitalLibrary = () => {
   const [contents, setContents] = useState([]);
+  const [recommended, setRecommended] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -37,6 +38,14 @@ const DigitalLibrary = () => {
       ]);
       setContents(cRes.data.data);
       setSubjects(sRes.data.data);
+
+      // Student recommendations are optional (requires quiz/graded data)
+      try {
+        const recRes = await API.get('/recommendations/me');
+        setRecommended(recRes.data.data?.recommendedContent || []);
+      } catch {
+        setRecommended([]);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -116,7 +125,47 @@ const DigitalLibrary = () => {
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}><CircularProgress /></Box>
       ) : (
-        <Grid container spacing={3}>
+        <>
+          {currentRole === 'student' && recommended.length > 0 && (
+            <Box sx={{ mb: 4 }}>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 2, color: '#0f172a' }}>
+                Recommended For You
+              </Typography>
+              <Grid container spacing={3}>
+                {recommended.slice(0, 4).map((content) => (
+                  <Grid item xs={12} sm={6} md={3} key={content._id}>
+                    <Card sx={{ borderRadius: 4, overflow: 'hidden', height: '100%', border: '1px solid #E2E8F0' }}>
+                      <CardMedia
+                        component="img"
+                        height="140"
+                        image={content.thumbnailUrl || 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&q=80&w=400'}
+                        alt={content.title}
+                      />
+                      <CardContent sx={{ p: 2.5 }}>
+                        <Typography variant="subtitle1" fontWeight="800" noWrap sx={{ color: '#0f172a' }}>
+                          {content.title}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {content.subject?.name} • {content.contentType}
+                        </Typography>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          href={content.fileUrl}
+                          target="_blank"
+                          sx={{ mt: 2, borderRadius: 2, textTransform: 'none' }}
+                        >
+                          Open
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            </Box>
+          )}
+
+          <Grid container spacing={3}>
           {filteredContents.map((content) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={content._id}>
               <Card sx={{ borderRadius: 4, overflow: 'hidden', height: '100%', border: '1px solid #E2E8F0', transition: '0.3s', '&:hover': { transform: 'translateY(-8px)', boxShadow: '0 12px 24px rgba(0,0,0,0.1)' } }}>
@@ -157,7 +206,8 @@ const DigitalLibrary = () => {
               </Card>
             </Grid>
           ))}
-        </Grid>
+          </Grid>
+        </>
       )}
 
       {/* Upload Dialog */}

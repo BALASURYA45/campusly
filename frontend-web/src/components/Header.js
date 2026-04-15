@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   AppBar, Toolbar, Typography, Button, Box, IconButton, Drawer, 
   List, ListItem, ListItemText, Divider, useMediaQuery, useTheme, ListItemIcon,
-  Avatar, Tooltip, Menu, MenuItem
+  Avatar, Tooltip, Menu, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions, Grow
 } from '@mui/material';
 import { logout, reset } from '../store/authSlice';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
@@ -17,9 +17,11 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import LoginIcon from '@mui/icons-material/Login';
 import SchoolIcon from '@mui/icons-material/School';
 import GroupIcon from '@mui/icons-material/Group';
+import PeopleIcon from '@mui/icons-material/People';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import SettingsIcon from '@mui/icons-material/Settings';
 import NotificationsIcon from '@mui/icons-material/Notifications';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import NotificationBell from './NotificationBell';
 
 const Header = ({ toggleColorMode, mode }) => {
@@ -29,6 +31,7 @@ const Header = ({ toggleColorMode, mode }) => {
   const { user } = useSelector((state) => state.auth);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
+  const [openLoginDialog, setOpenLoginDialog] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -88,6 +91,12 @@ const Header = ({ toggleColorMode, mode }) => {
   };
 
   const isActive = (path) => location.pathname === path;
+  const loginOptions = [
+    { label: 'Student', path: '/login/student', icon: <SchoolIcon />, color: '#3B82F6' },
+    { label: 'Teacher', path: '/login/teacher', icon: <PersonIcon />, color: '#10B981' },
+    { label: 'Parent', path: '/login/parent', icon: <PeopleIcon />, color: '#F59E0B' },
+    { label: 'Admin', path: '/login/admin', icon: <AdminPanelSettingsIcon />, color: '#8B5CF6' },
+  ];
 
   return (
     <>
@@ -193,7 +202,7 @@ const Header = ({ toggleColorMode, mode }) => {
                 ) : (
                   <Button 
                     variant="contained" 
-                    onClick={() => navigate('/')}
+                    onClick={() => setOpenLoginDialog(true)}
                     sx={{ borderRadius: '10px' }}
                   >
                     Login
@@ -253,7 +262,16 @@ const Header = ({ toggleColorMode, mode }) => {
                 </ListItem>
               </>
             ) : (
-              <Button fullWidth variant="contained" onClick={() => navigate('/')}>Login</Button>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={() => {
+                  setMobileOpen(false);
+                  setOpenLoginDialog(true);
+                }}
+              >
+                Login
+              </Button>
             )}
             <Divider sx={{ my: 2 }} />
             <ListItem button onClick={toggleColorMode} sx={{ borderRadius: 2 }}>
@@ -263,6 +281,43 @@ const Header = ({ toggleColorMode, mode }) => {
           </List>
         </Box>
       </Drawer>
+
+      <Dialog open={openLoginDialog} onClose={() => setOpenLoginDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Select Login Role</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'grid', gap: 1.5, mt: 1 }}>
+            {loginOptions.map((option, index) => (
+              <Grow in={openLoginDialog} timeout={220 + (index * 120)} key={option.path}>
+                <Button
+                  variant="outlined"
+                  startIcon={option.icon}
+                  onClick={() => {
+                    setOpenLoginDialog(false);
+                    navigate(option.path);
+                  }}
+                  sx={{
+                    justifyContent: 'flex-start',
+                    py: 1.2,
+                    borderColor: option.color,
+                    color: option.color,
+                    transition: 'all 0.25s ease',
+                    '&:hover': {
+                      borderColor: option.color,
+                      bgcolor: `${option.color}14`,
+                      transform: 'translateX(6px)',
+                    },
+                  }}
+                >
+                  {option.label} Login
+                </Button>
+              </Grow>
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenLoginDialog(false)}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 };

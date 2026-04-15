@@ -4,6 +4,7 @@ const {
   getStudentAttendanceReport,
   generateAttendanceReport,
   generatePerformanceReport,
+  generateMyPerformanceReport,
   generateClassReport,
   generateParentReport,
   getReports,
@@ -18,6 +19,7 @@ router.use(protect);
 
 router.get('/stats', authorize('admin', 'superadmin'), getStats);
 router.get('/attendance/:studentId', authorize('admin', 'teacher', 'parent', 'student'), getStudentAttendanceReport);
+router.get('/me/performance', authorize('student'), generateMyPerformanceReport);
 
 router.post('/attendance', authorize('teacher', 'admin'), generateAttendanceReport);
 router.post('/performance', authorize('teacher', 'admin', 'parent'), generatePerformanceReport);

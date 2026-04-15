@@ -3,6 +3,8 @@ const {
   getAllAssignments,
   getAssignmentsByClass,
   getAssignment,
+  getMyAssignmentsPlanner,
+  runMyAssignmentReminders,
   createAssignment,
   updateAssignment,
   deleteAssignment,
@@ -20,6 +22,8 @@ const router = express.Router();
 router.use(protect);
 
 router.get('/', getAllAssignments);
+router.get('/me/planner', authorize('student'), getMyAssignmentsPlanner);
+router.post('/me/reminders/run', authorize('student'), runMyAssignmentReminders);
 router.post('/', authorize('admin', 'teacher'), createAssignment);
 router.get('/class/:classId', getAssignmentsByClass);
 router.get('/:id', getAssignment);

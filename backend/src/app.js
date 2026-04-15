@@ -19,6 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Static folder
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+app.use('/exports', express.static(path.join(__dirname, '../exports')));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -49,6 +50,8 @@ const resourceRoutes = require('./routes/resourceRoutes');
 const quizRoutes = require('./routes/quizRoutes');
 const contentRoutes = require('./routes/contentRoutes');
 const digitalTwinRoutes = require('./routes/digitalTwinRoutes');
+const studyRoutes = require('./routes/studyRoutes');
+const recommendationRoutes = require('./routes/recommendationRoutes');
 
 // Routes
 app.use('/api/v1/auth', authRoutes);
@@ -69,6 +72,8 @@ app.use('/api/v1/resources', resourceRoutes);
 app.use('/api/v1/quizzes', quizRoutes);
 app.use('/api/v1/content', contentRoutes);
 app.use('/api/v1/digital-twin', digitalTwinRoutes);
+app.use('/api/v1/study', studyRoutes);
+app.use('/api/v1/recommendations', recommendationRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Smart Curriculum Activity & Attendance API is running...' });

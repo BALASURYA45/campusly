@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const XLSX = require('xlsx');
 const User = require('../src/models/User');
 const path = require('path');
+const COMMON_EMAIL = process.env.FROM_EMAIL || 'balasuryad13062006@gmail.com';
 
 const importParents = async () => {
   try {
@@ -60,12 +61,10 @@ const importParents = async () => {
           continue;
         }
 
-        const parentEmail = `parent_${parentId.replace(/[^a-z0-9]/gi, '')}@parent.edu`;
-
         // Create parent account
         await User.create({
           name: `Parent of ${student.name}`,
-          email: parentEmail,
+          email: COMMON_EMAIL,
           password: password,
           role: 'parent',
           parentId: parentId,

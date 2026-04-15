@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const XLSX = require('xlsx');
 const User = require('../src/models/User');
 const path = require('path');
+const COMMON_EMAIL = process.env.FROM_EMAIL || 'balasuryad13062006@gmail.com';
 
 const importComplete = async () => {
   try {
@@ -53,11 +54,9 @@ const importComplete = async () => {
       }
 
       try {
-        const studentEmail = `${rollNumberUpper.replace(/[^a-z0-9]/gi, '')}_student@sece.edu`;
-
         await User.create({
           name: `Student ${rollNumberUpper}`,
-          email: studentEmail,
+          email: COMMON_EMAIL,
           password: studentPassword,
           role: 'student',
           rollNumber: rollNumberUpper,

@@ -1,13 +1,29 @@
 const Resource = require('../models/Resource');
 const Subject = require('../models/Subject');
 const User = require('../models/User');
+const Joi = require('joi');
+
+// Validation schema for resource upload
+const resourceSchema = Joi.object({
+  subject: Joi.string().required(),
+  topic: Joi.string().required(),
+  type: Joi.string().required(),
+  class: Joi.string().required(),
+  isPublic: Joi.boolean(),
+});
 
 // @desc    Upload new digital content
 // @route   POST /api/v1/resources
 // @access  Private/Teacher/Admin
 exports.uploadResource = async (req, res, next) => {
   try {
-    req.body.uploadedBy = req.user.id;
+    req.body.uploadedBy = req.user?.id;
+
+    // Validate request body
+    const { error } = resourceSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ success: false, message: error.details[0].message });
+    }
 
     if (req.file) {
       req.body.fileUrl = `/uploads/resources/${req.file.filename}`;
@@ -18,7 +34,7 @@ exports.uploadResource = async (req, res, next) => {
     const resource = await Resource.create(req.body);
     res.status(201).json({ success: true, data: resource });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    next(err); // Use centralized error handler
   }
 };
 
@@ -34,6 +50,16 @@ exports.getResources = async (req, res, next) => {
     if (type) filter.type = type;
     if (classId) filter.class = classId;
 
+    // Ensure req.user exists
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized access' });
+    }
+
+    // Filter resources for student users
+    if (req.user.role === 'Student') {
+      filter.isPublic = true;
+    }
+
     const resources = await Resource.find(filter)
       .populate('subject', 'name code')
       .populate('class', 'name')
@@ -41,7 +67,7 @@ exports.getResources = async (req, res, next) => {
 
     res.status(200).json({ success: true, count: resources.length, data: resources });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    next(err); // Use centralized error handler
   }
 };
 

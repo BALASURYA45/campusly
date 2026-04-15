@@ -4,6 +4,9 @@ const Assignment = require('../models/Assignment');
 const Activity = require('../models/Activity');
 const Class = require('../models/Class');
 const User = require('../models/User');
+const QuizResult = require('../models/QuizResult');
+const StudySession = require('../models/StudySession');
+const StudyProfile = require('../models/StudyProfile');
 const mongoose = require('mongoose');
 const { generateCSV, generateExcel, generatePDF } = require('../utils/reportExport');
 
@@ -254,6 +257,207 @@ exports.generatePerformanceReport = async (req, res, next) => {
     });
 
     res.status(201).json({
+      success: true,
+      data: {
+        report,
+        ...reportData,
+      },
+    });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+};
+
+// @desc    Generate my (student) progress report
+// @route   GET /api/v1/reports/me/performance?format=pdf|csv|excel|json
+// @access  Private/Student
+exports.generateMyPerformanceReport = async (req, res, next) => {
+  try {
+    const studentId = req.user.id;
+    const format = String(req.query.format || 'json').toLowerCase();
+
+    const student = await User.findById(studentId);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+
+    const classes = await Class.find({ students: new mongoose.Types.ObjectId(studentId) }).select('_id name');
+    const classIds = classes.map((c) => c._id);
+
+    const assignments = await Assignment.find({ class: { $in: classIds } })
+      .populate('subject', 'name code')
+      .populate('teacher', 'name')
+      .select('title dueDate totalMarks subject teacher submissions');
+
+    const myAssignments = [];
+    for (const a of assignments) {
+      const sub = (a.submissions || []).find((s) => String(s.student) === String(studentId) || String(s.student?._id) === String(studentId));
+      myAssignments.push({
+        title: a.title,
+        subject: a.subject?.name || 'N/A',
+        dueDate: a.dueDate ? new Date(a.dueDate).toLocaleDateString() : '',
+        status: sub?.status || 'Not Submitted',
+        isLate: !!sub?.isLate,
+        submittedAt: sub?.submittedAt ? new Date(sub.submittedAt).toLocaleString() : '',
+        marks: sub?.grading?.marksObtained ?? '',
+        grade: sub?.grading?.grade ?? '',
+        teacher: a.teacher?.name || '',
+      });
+    }
+
+    const attendanceStats = await Attendance.aggregate([
+      { $match: { student: new mongoose.Types.ObjectId(studentId) } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+
+    const present = attendanceStats.find((a) => a._id === 'Present')?.count || 0;
+    const late = attendanceStats.find((a) => a._id === 'Late')?.count || 0;
+    const od = attendanceStats.find((a) => a._id === 'On-Duty')?.count || 0;
+    const half = attendanceStats.find((a) => a._id === 'Half-Day')?.count || 0;
+    const absent = attendanceStats.find((a) => a._id === 'Absent')?.count || 0;
+    const totalAttendance = attendanceStats.reduce((s, a) => s + a.count, 0);
+    const attendancePercentage = totalAttendance > 0 ? (((present + late + od + (half * 0.5)) / totalAttendance) * 100) : 0;
+
+    const submittedCount = myAssignments.filter((a) => a.status !== 'Not Submitted' && a.status !== 'Pending').length;
+    const overdueCount = myAssignments.filter((a) => a.status === 'Not Submitted' && a.dueDate && new Date(a.dueDate) < new Date()).length;
+    const graded = myAssignments.filter((a) => a.grade).length;
+
+    const quizResults = await QuizResult.find({ student: studentId })
+      .populate({ path: 'quiz', populate: { path: 'subject', select: 'name code' } })
+      .select('percentage score completedAt quiz');
+
+    const quizAvg = quizResults.length > 0
+      ? (quizResults.reduce((s, r) => s + (Number(r.percentage) || 0), 0) / quizResults.length)
+      : 0;
+
+    const quizBySubject = {};
+    for (const r of quizResults) {
+      const subj = r.quiz?.subject?.name || 'Unknown';
+      quizBySubject[subj] = quizBySubject[subj] || { attempts: 0, avg: 0, _sum: 0 };
+      quizBySubject[subj].attempts += 1;
+      quizBySubject[subj]._sum += Number(r.percentage) || 0;
+      quizBySubject[subj].avg = Number((quizBySubject[subj]._sum / quizBySubject[subj].attempts).toFixed(1));
+    }
+
+    // Study summary (week + streak)
+    const now = new Date();
+    const weekStart = (() => {
+      const d = new Date(now);
+      const day = d.getDay();
+      const diff = (day === 0 ? -6 : 1) - day;
+      d.setDate(d.getDate() + diff);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    })();
+
+    const profile = await StudyProfile.findOneAndUpdate(
+      { student: new mongoose.Types.ObjectId(studentId) },
+      { $setOnInsert: { weeklyGoalMinutes: 300 } },
+      { new: true, upsert: true }
+    );
+
+    const sessionsThisWeek = await StudySession.find({
+      student: studentId,
+      createdAt: { $gte: weekStart, $lte: now },
+    }).select('durationMinutes createdAt mode');
+
+    const minutesThisWeek = sessionsThisWeek.reduce((s, x) => s + (x.durationMinutes || 0), 0);
+
+    const streakWindowStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const recentSessions = await StudySession.find({
+      student: studentId,
+      createdAt: { $gte: streakWindowStart, $lte: now },
+    }).select('createdAt');
+
+    const dateKeyLocal = (date) => {
+      const d = new Date(date);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const daysWithStudy = new Set(recentSessions.map((s) => dateKeyLocal(s.createdAt)));
+    let streakDays = 0;
+    const cursor = new Date(now);
+    cursor.setHours(0, 0, 0, 0);
+    while (daysWithStudy.has(dateKeyLocal(cursor))) {
+      streakDays += 1;
+      cursor.setDate(cursor.getDate() - 1);
+      if (streakDays > 60) break;
+    }
+
+    const summary = {
+      studentName: student.name,
+      rollNumber: student.rollNumber || 'N/A',
+      classCount: classes.length,
+      attendancePercentage: `${attendancePercentage.toFixed(1)}%`,
+      assignmentsTotal: myAssignments.length,
+      assignmentsSubmitted: submittedCount,
+      assignmentsGraded: graded,
+      quizAttempts: quizResults.length,
+      quizAverage: `${quizAvg.toFixed(1)}%`,
+      engagementScore: `${student.digitalTwin?.engagementScore || 0}%`,
+      studyWeeklyGoalMinutes: profile.weeklyGoalMinutes || 300,
+      studyMinutesThisWeek: minutesThisWeek,
+      studyStreakDays: streakDays,
+    };
+
+    const details = [
+      ...myAssignments.map((a) => ({
+        type: 'Assignment',
+        title: a.title,
+        subject: a.subject,
+        status: a.status,
+        dueDate: a.dueDate,
+        submittedAt: a.submittedAt,
+        grade: a.grade,
+        marks: a.marks,
+        teacher: a.teacher,
+      })),
+      ...Object.entries(quizBySubject).map(([subject, v]) => ({
+        type: 'Quiz',
+        title: 'Quiz Performance',
+        subject,
+        status: `${v.attempts} attempt(s)`,
+        dueDate: '',
+        submittedAt: '',
+        grade: '',
+        marks: `${v.avg}%`,
+        teacher: '',
+      })),
+    ];
+
+    const statistics = {
+      attendance: summary.attendancePercentage,
+      submissionRate: myAssignments.length > 0 ? `${((submittedCount / myAssignments.length) * 100).toFixed(1)}%` : '0%',
+      overdueAssignments: overdueCount,
+      quizAverage: summary.quizAverage,
+      studyMinutesThisWeek: minutesThisWeek,
+      studyStreakDays: streakDays,
+    };
+
+    const reportData = { summary, details, statistics };
+
+    let fileInfo = null;
+    if (format !== 'json') {
+      const title = `Student Progress Report - ${student.rollNumber || student.name}`;
+      if (format === 'csv') fileInfo = generateCSV(reportData, title);
+      else if (format === 'excel') fileInfo = await generateExcel(reportData, title);
+      else if (format === 'pdf') fileInfo = await generatePDF(reportData, title);
+      else return res.status(400).json({ message: 'Invalid format. Use json|csv|excel|pdf' });
+    }
+
+    const report = await Report.create({
+      title: `Student Progress Report - ${student.rollNumber || student.name}`,
+      type: 'performance',
+      generatedBy: req.user.id,
+      class: classIds[0] || null,
+      data: reportData,
+      filters: { studentId },
+      format,
+      ...(fileInfo && {
+        fileUrl: `/exports/${fileInfo.fileName}`,
+        fileName: fileInfo.fileName,
+      }),
+    });
+
+    res.status(200).json({
       success: true,
       data: {
         report,

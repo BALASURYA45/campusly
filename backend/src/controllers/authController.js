@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const sendEmail = require('../utils/sendEmail');
+const COMMON_EMAIL = process.env.FROM_EMAIL || 'balasuryad13062006@gmail.com';
 
 // @desc    Register user
 // @route   POST /api/v1/auth/register
@@ -9,7 +9,7 @@ const sendEmail = require('../utils/sendEmail');
 exports.register = async (req, res, next) => {
   try {
     const { name, password, role, rollNumber } = req.body;
-    const email = 'balasuryad13062006@gmail.com'; // Use common email for all users
+    const email = COMMON_EMAIL;
 
     // Validate required fields
     if (!name || !password || !role) {
@@ -21,12 +21,8 @@ exports.register = async (req, res, next) => {
       return res.status(400).json({ message: 'Students must provide a roll number' });
     }
 
-    // Check if user already exists
-    let existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: 'Email already registered' });
-    }
-
+    // Check if user already exists by unique role identifiers
+    let existingUser;
     if (role === 'student' && rollNumber) {
       existingUser = await User.findOne({ rollNumber });
       if (existingUser) {
@@ -55,21 +51,7 @@ exports.register = async (req, res, next) => {
     // Create user
     const user = await User.create(userData);
 
-    // Try to send verification email, but don't fail registration if it doesn't work
-    if (process.env.NODE_ENV === 'production') {
-      const verifyUrl = `${req.protocol}://${req.get('host')}/api/v1/auth/verifyemail/${verificationToken}`;
-      const message = `Please verify your email by clicking the link: \n\n ${verifyUrl}`;
-      
-      try {
-        await sendEmail({
-          email: user.email,
-          subject: 'Email Verification',
-          message,
-        });
-      } catch (err) {
-        console.error('Email send error:', err.message);
-      }
-    }
+    // Email sending is disabled for this project. Verification is handled in-app.
 
     res.status(201).json({
       success: true,
@@ -190,19 +172,52 @@ exports.getMe = async (req, res, next) => {
 // @route   POST /api/v1/auth/forgotpassword
 // @access  Public
 exports.forgotPassword = async (req, res, next) => {
-  const { rollNumber } = req.body;
-  const resetEmail = 'balasuryad13062006@gmail.com';
+  const { email, rollNumber, employeeId, parentId, identifier } = req.body;
 
-  if (!rollNumber) {
-    return res.status(400).json({ message: 'Please provide your roll number' });
+  if (!email && !rollNumber && !employeeId && !parentId && !identifier) {
+    return res.status(400).json({ message: 'Please provide email or user ID (roll number / employee ID / parent ID)' });
   }
 
-  const user = await User.findOne({
-    rollNumber: rollNumber.toUpperCase(),
-  });
+  const rawIdentifier = String(identifier || '').trim();
+  const normalizedEmail = String(email || rawIdentifier).trim().toLowerCase();
+  const normalizedRoll = String(rollNumber || rawIdentifier).trim().toUpperCase();
+  const normalizedEmployeeId = String(employeeId || rawIdentifier).trim().toUpperCase();
+  const normalizedParentId = String(parentId || rawIdentifier).trim().toUpperCase();
+
+  let user;
+  if (email) {
+    user = await User.findOne({ email: normalizedEmail });
+  } else if (rollNumber) {
+    user = await User.findOne({ rollNumber: normalizedRoll });
+  } else if (employeeId) {
+    user = await User.findOne({ employeeId: normalizedEmployeeId });
+  } else if (parentId) {
+    user = await User.findOne({ parentId: normalizedParentId });
+  } else if (rawIdentifier) {
+    user = await User.findOne({
+      $or: [
+        { email: normalizedEmail },
+        { rollNumber: normalizedRoll },
+        { employeeId: normalizedEmployeeId },
+        { parentId: normalizedParentId },
+      ],
+    });
+  }
+
+  // Fallback: if role-specific lookup failed, try all identifier types once
+  if (!user && rawIdentifier) {
+    user = await User.findOne({
+      $or: [
+        { email: normalizedEmail },
+        { rollNumber: normalizedRoll },
+        { employeeId: normalizedEmployeeId },
+        { parentId: normalizedParentId },
+      ],
+    });
+  }
 
   if (!user) {
-    return res.status(404).json({ message: 'No user found with that roll number' });
+    return res.status(404).json({ message: 'No user found with the provided details' });
   }
 
   const resetToken = user.getResetPasswordToken();
@@ -212,27 +227,13 @@ exports.forgotPassword = async (req, res, next) => {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
   const resetUrl = `${frontendUrl}/reset-password/${resetToken}`;
 
-  const message = `A password reset was requested for roll number ${user.rollNumber}. Open this link to set a new password:\n\n${resetUrl}\n\nThis link expires in 10 minutes. If you did not request this, you can ignore this email.`;
-
-  try {
-    await sendEmail({
-      email: resetEmail,
-      subject: 'Smart Curriculum Password Reset',
-      message,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: `Password reset link sent to ${resetEmail}`,
-    });
-  } catch (err) {
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
-
-    await user.save({ validateBeforeSave: false });
-
-    return res.status(500).json({ message: 'Email could not be sent' });
-  }
+  // Email sending is disabled. We return the reset link so the user can proceed in-app.
+  // If you later re-enable email, switch this back to sending email instead of returning the URL.
+  res.status(200).json({
+    success: true,
+    message: 'Password reset link generated successfully.',
+    resetUrl,
+  });
 };
 
 // @desc    Reset password
@@ -356,7 +357,7 @@ exports.verifyStudentCredentials = async (req, res, next) => {
 exports.completeStudentSignup = async (req, res, next) => {
   try {
     const { name } = req.body;
-    const email = 'balasuryad13062006@gmail.com'; // Use common email for all users
+    const email = COMMON_EMAIL;
 
     if (!name) {
       return res.status(400).json({ message: 'Please provide name' });

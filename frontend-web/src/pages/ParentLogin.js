@@ -94,6 +94,14 @@ const ParentLogin = () => {
               onChange={onChange}
             />
             <Button
+              fullWidth
+              variant="text"
+              onClick={() => navigate('/forgot-password?role=parent')}
+              sx={{ mt: 1 }}
+            >
+              Forgot Password?
+            </Button>
+            <Button
               type="submit"
               fullWidth
               variant="contained"

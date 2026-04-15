@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const XLSX = require('xlsx');
 const User = require('../src/models/User');
 const path = require('path');
+const COMMON_EMAIL = process.env.FROM_EMAIL || 'balasuryad13062006@gmail.com';
 
 const smartImportStudents = async () => {
   try {
@@ -85,7 +86,6 @@ const smartImportStudents = async () => {
         }
 
         const studentName = `Student ${rollNumber}`;
-        const studentEmail = `${rollNumber.toLowerCase()}@student.edu`;
 
         let existingUser = await User.findOne({ rollNumber: rollNumber.toUpperCase() });
         if (existingUser) {
@@ -96,7 +96,7 @@ const smartImportStudents = async () => {
 
         const newStudent = await User.create({
           name: studentName,
-          email: studentEmail,
+          email: COMMON_EMAIL,
           password: password,
           role: 'student',
           rollNumber: rollNumber.toUpperCase(),

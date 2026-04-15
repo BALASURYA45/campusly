@@ -1,6 +1,5 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
-const sendEmail = require('../utils/sendEmail');
 
 // @desc    Get all notifications for a user
 // @route   GET /api/v1/notifications
@@ -173,6 +172,7 @@ exports.sendNotification = async (req, res, next) => {
     }
 
     const notifications = [];
+    const sanitizedMethods = { inApp: notificationMethods?.inApp !== false, email: false, push: false };
 
     for (const recipientId of recipientIds) {
       const notification = await Notification.create({
@@ -183,21 +183,13 @@ exports.sendNotification = async (req, res, next) => {
         sender: req.user.id,
         relatedModel,
         relatedId,
-        notificationMethods,
+        notificationMethods: sanitizedMethods,
         priority,
         actionUrl,
       });
 
       const populatedNotif = await notification.populate('sender', 'name email');
       notifications.push(populatedNotif);
-
-      if (notificationMethods.email) {
-        sendNotificationEmail(recipientId, notification, title, message);
-      }
-
-      if (notificationMethods.push) {
-        sendPushNotification(recipientId, notification, title, message);
-      }
 
       const io = req.app.get('socketio');
       if (io) {
@@ -208,6 +200,7 @@ exports.sendNotification = async (req, res, next) => {
           type,
           priority,
           createdAt: notification.createdAt,
+          actionUrl,
         });
       }
     }
@@ -250,6 +243,7 @@ exports.broadcastNotification = async (req, res, next) => {
     }
 
     const notifications = [];
+    const sanitizedMethods = { inApp: notificationMethods?.inApp !== false, email: false, push: false };
     for (const recipientId of recipientIds) {
       const notification = await Notification.create({
         recipient: recipientId,
@@ -257,15 +251,11 @@ exports.broadcastNotification = async (req, res, next) => {
         message,
         type,
         sender: req.user.id,
-        notificationMethods,
+        notificationMethods: sanitizedMethods,
         priority: 'high',
       });
 
       notifications.push(notification);
-
-      if (notificationMethods.email) {
-        sendNotificationEmail(recipientId, notification, title, message);
-      }
     }
 
     res.status(201).json({
@@ -275,60 +265,6 @@ exports.broadcastNotification = async (req, res, next) => {
     });
   } catch (err) {
     res.status(400).json({ message: err.message });
-  }
-};
-
-// Helper function to send email notification
-const sendNotificationEmail = async (userId, notification, title, message) => {
-  try {
-    const user = await User.findById(userId);
-    if (!user || !user.email) return;
-
-    const emailBody = `
-      <h2>${title}</h2>
-      <p>${message}</p>
-      <p><a href="${notification.actionUrl || process.env.FRONTEND_URL}">View Details</a></p>
-    `;
-
-    await sendEmail({
-      email: user.email,
-      subject: title,
-      message: emailBody,
-      html: true,
-    });
-
-    await Notification.updateOne(
-      { _id: notification._id },
-      { emailSent: true, emailSentAt: new Date() }
-    );
-  } catch (err) {
-    console.error('Error sending notification email:', err);
-  }
-};
-
-// Helper function to send push notification
-const sendPushNotification = async (userId, notification, title, message) => {
-  try {
-    const user = await User.findById(userId);
-    if (!user) return;
-
-    const io = global.io;
-    if (io) {
-      io.to(`user_${userId}`).emit('pushNotification', {
-        title,
-        message,
-        badge: '/badge.png',
-        icon: '/icon.png',
-        tag: notification.type,
-      });
-    }
-
-    await Notification.updateOne(
-      { _id: notification._id },
-      { pushSent: true, pushSentAt: new Date() }
-    );
-  } catch (err) {
-    console.error('Error sending push notification:', err);
   }
 };
 

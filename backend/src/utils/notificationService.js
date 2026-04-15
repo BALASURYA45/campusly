@@ -1,6 +1,5 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
-const sendEmail = require('./sendEmail');
 
 const sendNotification = async (options) => {
   try {
@@ -23,6 +22,12 @@ const sendNotification = async (options) => {
     }
 
     const notifications = [];
+    const sanitizedMethods = {
+      inApp: methods?.inApp !== false,
+      email: false,
+      push: false,
+    };
+    const io = global.io;
 
     for (const recipientId of recipients) {
       const notification = await Notification.create({
@@ -33,27 +38,24 @@ const sendNotification = async (options) => {
         sender,
         relatedModel,
         relatedId,
-        notificationMethods: methods,
+        notificationMethods: sanitizedMethods,
         priority,
         actionUrl,
       });
 
       notifications.push(notification);
 
-      const userPrefs = await User.findById(recipientId);
-      const shouldSendEmail = methods.email && userPrefs?.notificationPreferences?.email !== false;
-      const shouldSendPush = methods.push && userPrefs?.notificationPreferences?.push !== false;
-
-      if (shouldSendEmail) {
-        await sendNotificationEmail(recipientId, title, message, actionUrl).catch(err =>
-          console.error('Error sending email notification:', err.message)
-        );
-      }
-
-      if (shouldSendPush) {
-        await sendPushNotification(recipientId, title, message).catch(err =>
-          console.error('Error sending push notification:', err.message)
-        );
+      // Real-time in-app notification via socket.io (when available)
+      if (sanitizedMethods.inApp && io) {
+        io.to(`user_${recipientId}`).emit('notification', {
+          id: notification._id,
+          title,
+          message,
+          type,
+          priority,
+          createdAt: notification.createdAt,
+          actionUrl,
+        });
       }
     }
 
@@ -61,60 +63,6 @@ const sendNotification = async (options) => {
   } catch (err) {
     console.error('Error creating notification:', err);
     return null;
-  }
-};
-
-const sendNotificationEmail = async (userId, title, message, actionUrl) => {
-  try {
-    const user = await User.findById(userId);
-    if (!user || !user.email) return;
-
-    const htmlContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #333;">${title}</h2>
-        <p style="color: #666; font-size: 14px;">${message}</p>
-        ${actionUrl ? `<a href="${actionUrl}" style="display: inline-block; padding: 10px 20px; background-color: #1976d2; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">View Details</a>` : ''}
-        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-        <p style="color: #999; font-size: 12px;">This is an automated notification from Smart Curriculum. You can manage your notification preferences in your account settings.</p>
-      </div>
-    `;
-
-    await sendEmail({
-      email: user.email,
-      subject: title,
-      message: htmlContent,
-      html: true,
-    });
-
-    await Notification.updateMany(
-      { recipient: userId },
-      { emailSent: true, emailSentAt: new Date() },
-      { sort: { createdAt: -1 }, limit: 1 }
-    );
-  } catch (err) {
-    console.error('Error sending notification email:', err);
-  }
-};
-
-const sendPushNotification = async (userId, title, message) => {
-  try {
-    const io = global.io;
-    if (!io) return;
-
-    io.to(`user_${userId}`).emit('pushNotification', {
-      title,
-      message,
-      badge: '/badge.png',
-      icon: '/icon.png',
-    });
-
-    await Notification.updateMany(
-      { recipient: userId },
-      { pushSent: true, pushSentAt: new Date() },
-      { sort: { createdAt: -1 }, limit: 1 }
-    );
-  } catch (err) {
-    console.error('Error sending push notification:', err);
   }
 };
 
@@ -151,7 +99,7 @@ const notifyAssignmentCreated = async (assignmentId, classId, teacherId, assignm
       relatedModel: 'Assignment',
       relatedId: assignmentId,
       priority: 'high',
-      methods: { inApp: true, email: true, push: false }
+      methods: { inApp: true, email: false, push: false }
     });
     return notification;
   } catch (err) {
@@ -170,7 +118,7 @@ const notifyAssignmentSubmitted = async (assignmentId, studentId, studentName, t
       relatedModel: 'Assignment',
       relatedId: assignmentId,
       priority: 'medium',
-      methods: { inApp: true, email: true, push: false }
+      methods: { inApp: true, email: false, push: false }
     });
     return notification;
   } catch (err) {
@@ -205,7 +153,7 @@ const notifySystemAlert = async (recipients, title, message, priority = 'high') 
       message,
       type: 'alert',
       priority,
-      methods: { inApp: true, email: true, push: true }
+      methods: { inApp: true, email: false, push: false }
     });
     return notification;
   } catch (err) {
@@ -235,7 +183,7 @@ const notifyAtRiskStudent = async (student, riskLevel) => {
         relatedModel: 'User',
         relatedId: student._id,
         priority: riskLevel === 'Critical' ? 'high' : 'medium',
-        methods: { inApp: true, email: true, push: true }
+        methods: { inApp: true, email: false, push: false }
       });
     }
   } catch (err) {

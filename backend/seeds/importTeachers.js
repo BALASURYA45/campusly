@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const XLSX = require('xlsx');
 const User = require('../src/models/User');
 const path = require('path');
+const COMMON_EMAIL = process.env.FROM_EMAIL || 'balasuryad13062006@gmail.com';
 
 const importTeachers = async () => {
   try {
@@ -89,10 +90,6 @@ const importTeachers = async () => {
         const employeeId = String(id).trim().toUpperCase();
         const teacherPassword = String(password).trim();
 
-        // Generate a simple email for database storage (not used for login)
-        const randomNum = Math.random().toString(36).substring(7);
-        const teacherEmail = `teacher_${employeeId.replace(/[^a-z0-9]/gi, '')}_${randomNum}@school.edu`;
-
         // Check if teacher already exists by employeeId
         let existingUser = await User.findOne({ employeeId });
         if (existingUser) {
@@ -110,7 +107,7 @@ const importTeachers = async () => {
         // Create teacher account
         const newTeacher = await User.create({
           name: teacherName,
-          email: teacherEmail,
+          email: COMMON_EMAIL,
           password: teacherPassword,
           employeeId: employeeId,
           role: 'teacher',

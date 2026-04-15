@@ -41,6 +41,7 @@ import StudentResourceView from './pages/StudentResourceView';
 import StudentQuizView from './pages/StudentQuizView';
 import DigitalLibrary from './pages/DigitalLibrary';
 import TeacherIntervention from './pages/TeacherIntervention';
+import StudyHub from './pages/StudyHub';
 
 function App() {
   const { user } = useSelector((state) => state.auth);
@@ -95,6 +96,7 @@ function App() {
           <Route path="/resources" element={user ? <StudentResourceView /> : <Navigate to="/" />} />
           <Route path="/quizzes" element={user ? <StudentQuizView /> : <Navigate to="/" />} />
           <Route path="/library" element={user ? <DigitalLibrary /> : <Navigate to="/" />} />
+          <Route path="/study" element={user?.role === 'student' || user?.user?.role === 'student' ? <StudyHub /> : <Navigate to="/dashboard" />} />
           <Route path="/teacher/resources" element={user?.role === 'teacher' || user?.user?.role === 'teacher' ? <TeacherResourceManagement /> : <Navigate to="/dashboard" />} />
           <Route path="/teacher/quizzes" element={user?.role === 'teacher' || user?.user?.role === 'teacher' ? <TeacherQuizManagement /> : <Navigate to="/dashboard" />} />
           <Route path="/teacher/intervention/:studentId" element={user?.role === 'teacher' || user?.user?.role === 'teacher' ? <TeacherIntervention /> : <Navigate to="/dashboard" />} />

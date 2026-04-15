@@ -1,6 +1,7 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const User = require('../src/models/User');
+const COMMON_EMAIL = process.env.FROM_EMAIL || 'balasuryad13062006@gmail.com';
 
 const seedAdmin = async () => {
   try {
@@ -19,7 +20,7 @@ const seedAdmin = async () => {
 
     const adminData = {
       name: 'Admin User',
-      email: 'admin@smartcurriculum.edu',
+      email: COMMON_EMAIL,
       password: 'Admin@123',
       role: 'admin',
       isVerified: true,

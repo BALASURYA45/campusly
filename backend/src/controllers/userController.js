@@ -89,9 +89,51 @@ exports.getUser = async (req, res, next) => {
 // @access  Private/Admin
 exports.createUser = async (req, res, next) => {
   try {
-    const user = await User.create(req.body);
+    const { name, email, password, role, rollNumber, employeeId, parentId, children } = req.body;
+
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ message: 'Please provide name, email, password, and role' });
+    }
+
+    if (role === 'student' && !rollNumber) {
+      return res.status(400).json({ message: 'Roll number is required for students' });
+    }
+
+    if (role === 'teacher' && !employeeId) {
+      return res.status(400).json({ message: 'Employee ID is required for teachers' });
+    }
+
+    if (role === 'parent' && !parentId) {
+      return res.status(400).json({ message: 'Parent ID is required for parents' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existingEmailUser = await User.findOne({ email: normalizedEmail });
+    if (existingEmailUser) {
+      return res.status(400).json({ message: 'Email already exists' });
+    }
+
+    const payload = {
+      name: String(name).trim(),
+      email: normalizedEmail,
+      password: String(password),
+      role,
+      isVerified: true,
+      verificationToken: undefined,
+    };
+
+    if (role === 'student') payload.rollNumber = String(rollNumber).trim().toUpperCase();
+    if (role === 'teacher') payload.employeeId = String(employeeId).trim().toUpperCase();
+    if (role === 'parent') payload.parentId = String(parentId).trim().toUpperCase();
+    if (role === 'parent' && Array.isArray(children)) payload.children = children;
+
+    const user = await User.create(payload);
     res.status(201).json({ success: true, data: user });
   } catch (err) {
+    if (err.code === 11000) {
+      const duplicateField = Object.keys(err.keyPattern || {})[0] || 'field';
+      return res.status(400).json({ message: `${duplicateField} already exists` });
+    }
     res.status(400).json({ message: err.message });
   }
 };
@@ -101,7 +143,18 @@ exports.createUser = async (req, res, next) => {
 // @access  Private/Admin
 exports.updateUser = async (req, res, next) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, req.body, {
+    const updateData = { ...req.body };
+
+    if (Object.prototype.hasOwnProperty.call(updateData, 'email') && updateData.email) {
+      const normalizedEmail = String(updateData.email).trim().toLowerCase();
+      const existingEmailUser = await User.findOne({ email: normalizedEmail, _id: { $ne: req.params.id } });
+      if (existingEmailUser) {
+        return res.status(400).json({ message: 'Email already exists' });
+      }
+      updateData.email = normalizedEmail;
+    }
+
+    const user = await User.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
     });

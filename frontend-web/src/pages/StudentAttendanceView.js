@@ -7,14 +7,19 @@ import { useSelector } from 'react-redux';
 const StudentAttendanceView = () => {
   const [attendance, setAttendance] = useState([]);
   const [stats, setStats] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const { user } = useSelector((state) => state.auth);
 
   const fetchAttendance = useCallback(async () => {
     try {
-      const { data: recordsRes } = await API.get('/attendance/me');
+      const [{ data: recordsRes }, { data: summaryRes }] = await Promise.all([
+        API.get('/attendance/me'),
+        API.get('/attendance/me/summary?targetPercentage=75'),
+      ]);
       const studentRecords = recordsRes.data || [];
       setAttendance(studentRecords.sort((a, b) => new Date(b.date) - new Date(a.date)));
+      setSummary(summaryRes.data || null);
 
       const groupedStats = studentRecords.reduce((acc, record) => {
         acc[record.status] = (acc[record.status] || 0) + 1;
@@ -47,6 +52,7 @@ const StudentAttendanceView = () => {
   } : null;
 
   const calculatePercentage = () => {
+    if (summary?.percentage !== undefined) return summary.percentage;
     if (!stats || stats.length === 0) return 0;
     const present = stats.find(s => s._id === 'Present')?.count || 0;
     const late = stats.find(s => s._id === 'Late')?.count || 0;
@@ -73,7 +79,25 @@ const StudentAttendanceView = () => {
                 <Typography variant="h4" component="div" color="textSecondary">{`${calculatePercentage()}%`}</Typography>
               </Box>
             </Box>
-            <Typography variant="body2" color="textSecondary">Keep it above 75%!</Typography>
+            <Typography variant="body2" color="textSecondary">
+              Target: {summary?.targetPercentage ?? 75}%
+            </Typography>
+            <Divider sx={{ my: 2 }} />
+            {summary ? (
+              summary.percentage >= (summary.targetPercentage ?? 75) ? (
+                <Typography variant="body2" color="success.main">
+                  Safe. You can miss up to {summary.classesCanMissAndStayAtTarget} classes and stay above {summary.targetPercentage}%.
+                </Typography>
+              ) : (
+                <Typography variant="body2" color="warning.main">
+                  Attend the next {summary.classesNeededToReachTarget} classes to reach {summary.targetPercentage}%.
+                </Typography>
+              )
+            ) : (
+              <Typography variant="body2" color="textSecondary">
+                Calculator loading...
+              </Typography>
+            )}
           </Paper>
         </Grid>
 
